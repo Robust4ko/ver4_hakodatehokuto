@@ -1,6 +1,7 @@
-// ver4.1：JA/ENトグル + 二段フッター対応 + ボタン見た目分離 + name_en 将来対応（未定義は name をコピー）
-// SVGアイコン / 欠け対策 / 当たり判定最適化 / 700m→500mフォールバック
-// ポップアップは足元一致＋★アイコン高さに応じて自動オフセット（lift）
+// ver4.2：スマホ最適化
+//  - 追加1: 「マーカー初回タップで、出発地点=そのマーカー位置として即ルート描画」
+//  - 追加2: タッチ端末ではマーカー表示サイズ&当たり判定(circle shape)を少し小さく
+// 既存: JA/ENトグル / 二段フッター / SVGアイコン / 欠け対策 / 700m→500mフォールバック ほか
 
 /* ========== グローバル ========== */
 let map;
@@ -233,17 +234,20 @@ function loadEvacPoints() {
 
 /* ========== マーカー（SVG） ========== */
 // 欠け対策：size=原寸, scaledSize=表示サイズ, optimized:false
-// 当たり判定：point は小さめ、shape で円領域。anchor は足元（下辺中央）。
+// 当たり判定：タッチ端末では少し小さめ。shape は円領域。anchor は足元（下辺中央）。
 function addCustomMarker(position, title, type = "building") {
   const iconUrl = (type === "point") ? "./HP.svg" : "./HB.svg";
 
   const BASE = 606; // SVG viewBox ≒ 605.67
-  const sizeByType = { building: 34, point: 20 };
-  const w = sizeByType[type] || 30;
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+  // ★タッチ端末で少し小さめに（当たり判定も連動で縮小）
+  const sizeByType = isTouch ? { building: 28, point: 16 } : { building: 34, point: 20 };
+  const w = sizeByType[type] || (isTouch ? 26 : 30);
   const h = w;
   const cx = Math.floor(w / 2);
   const cy = Math.floor(h / 2);
-  const r  = Math.max(6, Math.floor(w / 2) - 2);
+  const r  = Math.max(4, Math.floor(w / 2) - (isTouch ? 4 : 2));
 
   const marker = new google.maps.Marker({
     position: new google.maps.LatLng(position.lat, position.lng),
@@ -262,7 +266,22 @@ function addCustomMarker(position, title, type = "building") {
   });
 
   marker.addListener("click", () => {
-    const dest = destinations.find(d => Math.abs(d.location.lat - position.lat)<1e-9 && Math.abs(d.location.lng - position.lng)<1e-9) || { name: title, name_en: title, location: position };
+    // 登録済みデータを同一座標で拾う（見つからない場合は即席オブジェクト）
+    const dest =
+      destinations.find(d =>
+        Math.abs(d.location.lat - position.lat) < 1e-9 &&
+        Math.abs(d.location.lng - position.lng) < 1e-9
+      ) || { name: title, name_en: title, location: position };
+
+    // ★追加1: 出発地点が未設定なら、このタップで出発地点=マーカー位置＆即ルート
+    if (!startMarker) {
+      setStartPoint(marker.getPosition());
+      latestDestination = dest;
+      drawRoute(startMarker.getPosition(), dest.location);
+      return; // ここではポップアップを開かない（もうルートが出るため）
+    }
+
+    // 出発地点がある場合は従来どおりポップアップ
     openDestinationPopup(dest, marker);
   });
 
@@ -271,12 +290,12 @@ function addCustomMarker(position, title, type = "building") {
 
 /* ========== ポップアップ（InfoWindow） ========== */
 // 矢印先端＝足元（marker.getPosition()）に一致。
-// ★変更：アイコン高さを読み取り、pixelOffset を 6〜18px の範囲で自動計算（基準 h*0.35）
+// アイコン高さから pixelOffset を自動計算（lift）
 function openDestinationPopup(dest, marker) {
   latestDestination = dest;
 
-  // ★ここが可変オフセット（lift）の計算
-  let lift = 20; // デフォは +10px
+  // 可変オフセット（lift）の計算
+  let lift = 20;
   try {
     const icon = marker.getIcon && marker.getIcon();
     const h = (icon && icon.scaledSize && Number(icon.scaledSize.height)) || 0;
@@ -297,12 +316,12 @@ function openDestinationPopup(dest, marker) {
   if (!infoWindow) {
     infoWindow = new google.maps.InfoWindow({
       maxWidth: 260,
-      pixelOffset: new google.maps.Size(0, -lift)  // ★自動計算した持ち上げ量を適用
+      pixelOffset: new google.maps.Size(0, -lift)
     });
   } else {
     infoWindow.setOptions({
       maxWidth: 260,
-      pixelOffset: new google.maps.Size(0, -lift)  // ★更新
+      pixelOffset: new google.maps.Size(0, -lift)
     });
   }
 
@@ -316,6 +335,7 @@ function openDestinationPopup(dest, marker) {
     el.addEventListener("click", (e) => {
       e.preventDefault();
       if (!startMarker) {
+        // （保険）ここに来るのは通常2回目タップ以降だが、未設定時は案内
         displayMessage(t("need_start"));
         map.panTo(marker.getPosition());
         return;
@@ -480,3 +500,4 @@ function useCurrentLocation() {
 window.initMap = initMap;
 window.useCurrentLocation = useCurrentLocation;
 window.launchGoogleMap = launchGoogleMap;
+
