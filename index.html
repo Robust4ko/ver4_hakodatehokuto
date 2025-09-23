@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>津波避難シミュレーション</title>
+  <style>
+    :root{
+      /* JSで実測して更新するが、初期値も入れておく */
+      --header-h: 64px;
+      --footer-h: 24px; /* 下段footerの高さ */
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", Meiryo, Arial, sans-serif;
+      color: #111;
+    }
+
+    /* ヘッダー（青帯）— 画面上部に固定 */
+    header#app-header {
+      background-color: #00bfff;
+      color: #fff;
+      padding: 6px 16px;
+      text-align: center;
+      position: fixed;   /* ← 固定 */
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;     /* 地図や吹き出しより前面に */
+    }
+    header#app-header h1 {
+      font-size: 1.1em;
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: .5px;
+    }
+    header#app-header .subtext {
+      font-size: 0.75em;
+      margin-top: 2px;
+      color: #f0f8ff;
+    }
+    /* ヘッダー右上の言語トグル */
+    .header-actions{
+      position:absolute;
+      right:12px;
+      top:50%;
+      transform:translateY(-50%);
+      display:flex;
+      gap:8px;
+    }
+    #lang-toggle{
+      background:#eee; color:#333;
+      border:1px solid #ccc; border-radius:8px;
+      padding:6px 12px; font-weight:600; font-size:14px;
+      line-height:1; cursor:pointer; transition:filter .15s;
+    }
+    #lang-toggle:hover{ filter:brightness(0.96); }
+    #lang-toggle:focus-visible{ outline:2px solid #333; outline-offset:2px; }
+
+    /* 全体レイアウト：ヘッダー分の余白を上に確保 */
+    .container {
+      height: 100vh;
+      padding-top: var(--header-h);  /* ← ヘッダー高さぶん下げる */
+      display: flex;
+      flex-direction: column;
+    }
+    .map-area { flex-grow: 1; position: relative; }
+    #map { position: absolute; inset: 0; }
+
+/* 上段フッター（info-area）— はみ出し根絶 */
+.info-area {
+  position: fixed;
+  left: 0;
+  right: 0; /* ← 100vwを使わず左右0で固定 */
+  bottom: var(--footer-h, 24px);
+  box-sizing: border-box;
+  background-color: #e0e0e0;
+  /* 端末の安全域も込みでインセット。paddingは内側で確保 */
+  padding: 8px 12px;
+  font-size: 0.85em;
+  z-index: 900;
+  box-shadow: 0 0 10px rgba(0,0,0,.3);
+}
+
+/* 右端の見切れを防ぐための内側ラッパー（任意だが推奨） */
+.info-area .inner {
+  max-width: 960px;          /* デスクトップで広がり過ぎない */
+  margin: 0 auto;            /* 中央寄せ */
+  padding-right: max(12px, env(safe-area-inset-right)); /* iOS安全域対策 */
+  padding-left:  max(12px, env(safe-area-inset-left));
+}
+
+/* ボタン行：2等分。minmax(0,1fr) で子要素の最小幅を0に固定し溢れ防止 */
+.button-row {
+  display: grid; 
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* ← これが効きます */
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* ボタン：必ず親の中に収める（長い日本語/英語でもOK） */
+.button-row button {
+  width: 100%;
+  min-width: 0;               /* ← min-contentによるはみ出しを無効化 */
+  white-space: normal;        /* 折り返し許可 */
+  overflow-wrap: anywhere;    /* スペース無しでもどこでも折り返す */
+  line-height: 1.25;
+  font-size: 0.95em;
+  padding: 10px 10px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  transition: filter .15s, background .15s;
+}
+
+/* ごく狭い幅では1列に積む */
+@media (max-width: 380px) {
+  .button-row { grid-template-columns: 1fr; }
+}
+    button.use-location { background-color: #007bff; }
+    button.use-location:hover { filter:brightness(0.95); }
+    button.launch-gmap { background-color: #28a745; }
+    button.launch-gmap:hover { filter:brightness(0.95); }
+
+    /* 下段 footer（作成者表示） */
+    footer {
+      background-color: #fff;
+      color: gray;
+      text-align: center;
+      padding: 3px;
+      font-size: 0.6em;
+      position: fixed;
+      width: 100%;
+      bottom: 0;
+      z-index: 800;
+      height: var(--footer-h);      /* レイアウト計算用 */
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 768px) {
+      header#app-header h1 { font-size: 1em; }
+      header#app-header .subtext { font-size: 0.7em; }
+      .info-area { font-size: 0.85em; padding: 8px 12px; width: 100vw; }
+      .button-row { gap: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 固定ヘッダー -->
+  <header id="app-header">
+    <h1 data-i18n="header_title">津波避難シミュレーション</h1>
+    <p class="subtext" data-i18n="header_subtext">📍 地図をクリックすると避難経路を表示します</p>
+    <div class="header-actions">
+      <button id="lang-toggle" type="button" aria-label="Switch language">EN</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="map-area">
+      <div id="map" role="application" aria-label="map"></div>
+    </div>
+
+    <!-- 上段フッター（info-area） -->
+    <div class="info-area">
+      <div class="inner"><!-- ← 追加 -->
+        <h2 data-i18n="info_title">最短の避難先：</h2>
+        <p id="nearest-destination" data-i18n="info_hint">クリックして確認してください</p>
+        <div class="button-row">
+          <button class="use-location" onclick="useCurrentLocation()" data-i18n="btn_use_current">
+            現在地から避難
+          </button>
+          <button class="launch-gmap" onclick="launchGoogleMap()" data-i18n="btn_open_gmaps">
+            Googleマップで開く
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 下段footer（作成者） -->
+  <footer>都市地域デザイン学研究室</footer>
+
+  <!-- アプリ本体 -->
+  <script src="./map_eva.js"></script>
+
+  <!-- ヘッダー高さを実測し、CSS変数を更新（可変行高に対応） -->
+  <script>
+    function updateHeaderHeightVar(){
+      const h = document.getElementById('app-header')?.offsetHeight || 64;
+      document.documentElement.style.setProperty('--header-h', h + 'px');
+    }
+    window.addEventListener('load', updateHeaderHeightVar);
+    window.addEventListener('resize', updateHeaderHeightVar);
+  </script>
+
+  <!-- Google Maps（APIキー差し替え）-->
+    <script async defer 
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDHARZBVr3rzCr_ejyqvMVxoU-V9VfKnfw&language=ja&callback=initMap">
+    </script>
+</body>
+</html>
