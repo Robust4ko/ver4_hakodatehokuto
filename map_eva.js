@@ -1,4 +1,4 @@
-// map_eva.js （SVGアイコン版 + 多言語メッセージ対応）
+// map_eva.js （SVGアイコン + 多言語 + DistanceMatrix フォールバック）
 
 /*
  1. コマンドプロンプトで、「E:\」を入力
@@ -19,7 +19,9 @@ const MSG = {
     dirErrorPrefix: "経路描画エラー: ",
     geolocFail: (m)=>`現在地の取得に失敗しました: ${m}`,
     browserNoGeo: "このブラウザは位置情報をサポートしていません。",
-    needStartAndDest: "出発地点と目的地を設定してください。"
+    needStartAndDest: "出発地点と目的地を設定してください。",
+    narrowedTo500: "候補が多いため、500m以内に絞って探索しました。",
+    usingTop25: "候補が多いため、近い25件に絞って探索しました。"
   },
   en: {
     noNearby: "No shelters within 700 m.",
@@ -29,7 +31,9 @@ const MSG = {
     dirErrorPrefix: "Directions error: ",
     geolocFail: (m)=>`Failed to get current location: ${m}`,
     browserNoGeo: "This browser does not support Geolocation.",
-    needStartAndDest: "Please set both your start point and destination."
+    needStartAndDest: "Please set both your start point and destination.",
+    narrowedTo500: "Too many candidates; narrowed to 500 m radius.",
+    usingTop25: "Too many candidates; using the nearest 25."
   }
 };
 function T(key){ return MSG[APP_LANG][key]; }
@@ -201,6 +205,20 @@ function openDestinationPopup(dest, marker) {
   });
 }
 
+// ===== 直線距離（メートル）=====
+function haversineMeters(a, b) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
 // ===== 出発地点の設定 =====
 function setStartPoint(location) {
   if (startMarker) startMarker.setMap(null);
@@ -212,31 +230,58 @@ function setStartPoint(location) {
   findClosestPoint(location);
 }
 
-// ===== 最近傍の避難先を探索（半径700m）=====
-function findClosestPoint(origin) {
-  function getDistanceInMeters(loc1, loc2) {
-    const R = 6371000;
-    const toRad = (deg) => (deg * Math.PI) / 180;
-    const dLat = toRad(loc2.lat - loc1.lat);
-    const dLng = toRad(loc2.lng - loc1.lng);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(loc1.lat)) *
-        Math.cos(toRad(loc2.lat)) *
-        Math.sin(dLng / 2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
+// ===== 近傍抽出 & フォールバック選定 =====
+function selectDestinationsForMatrix(originLatLng) {
+  const origin = { lat: originLatLng.lat(), lng: originLatLng.lng() };
 
-  const nearbyDestinations = destinations.filter((dest) => {
-    const distance = getDistanceInMeters(
-      { lat: origin.lat(), lng: origin.lng() },
-      { lat: dest.location.lat, lng: dest.location.lng }
-    );
-    return distance <= 700;
+  const withinRadius = (list, r) => list.filter(d => {
+    return haversineMeters(origin, d.location) <= r;
   });
 
-  if (nearbyDestinations.length === 0) {
+  // 700m 抽出
+  const in700 = withinRadius(destinations, 700);
+
+  if (in700.length === 0) {
+    return { list: [], note: null };
+  }
+
+  if (in700.length <= 25) {
+    return { list: in700, note: null };
+  }
+
+  // 25超え → 500m に再絞り
+  const in500 = withinRadius(destinations, 500);
+
+  if (in500.length === 0) {
+    // 500m に存在しない場合は、700m から近い順 25 件
+    const top25 = in700
+      .map(d => ({ d, dist: haversineMeters(origin, d.location) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 25)
+      .map(x => x.d);
+    return { list: top25, note: "usingTop25" };
+  }
+
+  if (in500.length <= 25) {
+    return { list: in500, note: "narrowedTo500" };
+  }
+
+  // 500m でも 25 超 → 近い順 25 件
+  const top25in500 = in500
+    .map(d => ({ d, dist: haversineMeters(origin, d.location) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 25)
+    .map(x => x.d);
+
+  return { list: top25in500, note: "usingTop25" };
+}
+
+// ===== 最近傍の避難先を探索（Distance Matrix に渡す候補を選ぶ）=====
+function findClosestPoint(originLatLng) {
+  const origin = originLatLng;
+  const selection = selectDestinationsForMatrix(origin);
+
+  if (selection.list.length === 0) {
     displayMessage(T('noNearby'));
     directionsRenderer.setDirections({ routes: [] });
     lastDistanceMeters = null;
@@ -245,7 +290,14 @@ function findClosestPoint(origin) {
     return;
   }
 
-  const destinationLocations = nearbyDestinations.map((dest) => dest.location);
+  // 必要なら注記メッセージ（UIに軽く表示）
+  if (selection.note) {
+    // 既存表示を上書きしすぎないよう、注記だけ一時表示
+    // （必要に応じてトースト等に変更可能）
+    console.log(selection.note === "narrowedTo500" ? T('narrowedTo500') : T('usingTop25'));
+  }
+
+  const destinationLocations = selection.list.map((dest) => dest.location);
 
   distanceMatrixService.getDistanceMatrix(
     {
@@ -256,17 +308,20 @@ function findClosestPoint(origin) {
     function (response, status) {
       if (status === google.maps.DistanceMatrixStatus.OK) {
         const distances = response.rows[0].elements;
+
+        // 最小距離のインデックスを取得
         let closestIndex = 0;
         let minDistance = distances[0].distance.value;
-
         for (let i = 1; i < distances.length; i++) {
-          if (distances[i].distance.value < minDistance) {
+          if (distances[i].status === "OK" && distances[i].distance.value < minDistance) {
             minDistance = distances[i].distance.value;
             closestIndex = i;
           }
         }
 
-        latestDestination = nearbyDestinations[closestIndex];
+        latestDestination = selection.list[closestIndex];
+
+        // 距離・時間を保持し、表示
         lastDistanceMeters = distances[closestIndex].distance.value;
         lastDurationText  = distances[closestIndex].duration.text;
 
@@ -275,7 +330,48 @@ function findClosestPoint(origin) {
           : `${latestDestination.name} (${lastDistanceMeters} m, about ${lastDurationText})`;
 
         displayMessage(summary);
+
+        // 経路描画
         drawRoute(origin, latestDestination.location);
+      } else if (status === "MAX_DIMENSIONS_EXCEEDED") {
+        // 念のための二重フォールバック（理論上ここには来ない想定）
+        console.warn("MAX_DIMENSIONS_EXCEEDED fallback triggered.");
+        const nearest25 = selection.list
+          .map(d => ({ d, dist: haversineMeters({ lat: origin.lat(), lng: origin.lng() }, d.location) }))
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, 25)
+          .map(x => x.d);
+
+        distanceMatrixService.getDistanceMatrix(
+          {
+            origins: [origin],
+            destinations: nearest25.map(d => d.location),
+            travelMode: google.maps.TravelMode.WALKING,
+          },
+          function (resp2, status2) {
+            if (status2 === google.maps.DistanceMatrixStatus.OK) {
+              const distances2 = resp2.rows[0].elements;
+              let idx = 0;
+              let min = distances2[0].distance.value;
+              for (let i = 1; i < distances2.length; i++) {
+                if (distances2[i].status === "OK" && distances2[i].distance.value < min) {
+                  min = distances2[i].distance.value;
+                  idx = i;
+                }
+              }
+              latestDestination = nearest25[idx];
+              lastDistanceMeters = distances2[idx].distance.value;
+              lastDurationText  = distances2[idx].duration.text;
+              const summary2 = (APP_LANG === "ja")
+                ? `${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`
+                : `${latestDestination.name} (${lastDistanceMeters} m, about ${lastDurationText})`;
+              displayMessage(summary2);
+              drawRoute(origin, latestDestination.location);
+            } else {
+              displayMessage(T('errorPrefix') + status2);
+            }
+          }
+        );
       } else {
         displayMessage(T('errorPrefix') + status);
       }
