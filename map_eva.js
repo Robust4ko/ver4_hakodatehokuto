@@ -1,12 +1,43 @@
-// map_eva.js （SVGアイコン全面表示 修正版）
+// map_eva.js （SVGアイコン版 + 多言語メッセージ対応）
 
 /*
- 1. コマンドプロンプトで、「E:」を入力
- 2. パスの指定「cd "E:\2025年度\app_googlemap\map_simulation"」を入力実行
- 3. サーバー開通「python -m http.server 8000」を入力実行
- 4. ブラウザで「http://localhost:8000/index.html」を検索→完了 http://localhost:8000/map_hakodate/index.html
- 5. コマンドプロンプトで、「コントロール＋C」でサーバー停止（コマンドプロンプトを閉じれば停止される）
+ 1. コマンドプロンプトで、「E:\」を入力
+ 2. cd "E:\2025年度\app_googlemap\map_simulation"
+ 3. python -m http.server 8000
+ 4. http://localhost:8000/index.html
+ 5. 停止は Ctrl+C
 */
+
+// ===== 多言語メッセージ辞書（UIは index.html 側、運用メッセージはここ）=====
+let APP_LANG = "ja";
+const MSG = {
+  ja: {
+    noNearby: "700m以内に避難場所がありません。",
+    noStartSet: "出発地点が未設定です。地図をタップするか「現在地から避難」を押してください。",
+    routeDrawing: "へ経路を表示中…",
+    errorPrefix: "エラー: ",
+    dirErrorPrefix: "経路描画エラー: ",
+    geolocFail: (m)=>`現在地の取得に失敗しました: ${m}`,
+    browserNoGeo: "このブラウザは位置情報をサポートしていません。",
+    needStartAndDest: "出発地点と目的地を設定してください。"
+  },
+  en: {
+    noNearby: "No shelters within 700 m.",
+    noStartSet: "No start point yet. Tap the map or press “Evacuate from current location”.",
+    routeDrawing: " showing route…",
+    errorPrefix: "Error: ",
+    dirErrorPrefix: "Directions error: ",
+    geolocFail: (m)=>`Failed to get current location: ${m}`,
+    browserNoGeo: "This browser does not support Geolocation.",
+    needStartAndDest: "Please set both your start point and destination."
+  }
+};
+function T(key){ return MSG[APP_LANG][key]; }
+
+// 外部（index.html）から言語を切り替えるために公開
+window.setAppLanguage = function(lang){
+  APP_LANG = (lang === "en") ? "en" : "ja";
+};
 
 // ===== グローバル変数 =====
 let map;
@@ -76,21 +107,20 @@ function initMap() {
   });
 }
 
-// ===== 目的地（避難ビル等）を読み込み（HB.svg） =====
+// ===== 目的地（避難ビル等）HB.svg =====
 function loadDestinations() {
   fetch("./destinations.json")
     .then((response) => response.json())
     .then((data) => {
       destinations = data;
       data.forEach((dest) => {
-        // HB.svg を大きめに（当たり判定：34px）
         addCustomMarker(dest.location, dest.name, "./HB.svg", 34);
       });
     })
-    .catch((error) => displayMessage("避難ビルの読み込みエラー: " + error));
+    .catch((error) => displayMessage((T('errorPrefix')) + error));
 }
 
-// ===== 水平避難ポイントを読み込み（HP.svg、destinationsに統合）=====
+// ===== 水平避難ポイント HP.svg（destinationsに統合）=====
 function loadEvacPoints() {
   fetch("./evac_points.json")
     .then((response) => response.json())
@@ -104,19 +134,16 @@ function loadEvacPoints() {
           },
         };
         destinations.push(structured);
-        // HP.svg はやや小さめ（当たり判定：26px）
         addCustomMarker(structured.location, structured.name, "./HP.svg", 26);
       });
     })
-    .catch((error) => displayMessage("水平避難ポイントの読み込みエラー: " + error));
+    .catch((error) => displayMessage((T('errorPrefix')) + error));
 }
 
-// ===== マーカー生成（SVG画像、クリックで吹き出し表示）=====
-// iconUrl: "./HB.svg" or "./HP.svg"
-// sizePx: 表示サイズ（クリック当たり判定も同じ矩形）
+// ===== マーカー生成（SVG画像表示フル）=====
 function addCustomMarker(position, title, iconUrl, sizePx = 32) {
   const scaled = new google.maps.Size(sizePx, sizePx);
-  const anchor = new google.maps.Point(sizePx / 2, sizePx / 2); // 中心を座標に合わせる
+  const anchor = new google.maps.Point(sizePx / 2, sizePx / 2);
   const labelOrigin = new google.maps.Point(sizePx / 2, sizePx + 4);
 
   const marker = new google.maps.Marker({
@@ -126,14 +153,11 @@ function addCustomMarker(position, title, iconUrl, sizePx = 32) {
     zIndex: 10,
     icon: {
       url: iconUrl,
-      // ▼ 重要：SVGが一部しか表示される問題を避けるために size は指定しない
-      //   scaledSize のみ指定して、全体を縮小表示させる
-      scaledSize: scaled,
+      scaledSize: scaled, // 全面縮小表示
       anchor: anchor,
       labelOrigin: labelOrigin,
-      // originは既定(0,0)のままでOK（スプライトを使わないため）
     },
-    optimized: false,  // SVGの切り取り/拡大縮小の不具合を避けるため canvas 描画に
+    optimized: false,
   });
 
   marker.addListener("click", () => {
@@ -149,30 +173,30 @@ function openDestinationPopup(dest, marker) {
   if (!infoWindow) infoWindow = new google.maps.InfoWindow();
 
   const linkId = "goto-" + Math.random().toString(36).slice(2);
+  const linkText = (APP_LANG === "ja") ? "ここに行く" : "Go here";
+
   const html = `
     <div style="font-size:14px; line-height:1.5; background:#fff; color:#000; padding:2px 0;">
       <div style="font-weight:600; margin-bottom:6px;">${escapeHtml(dest.name)}</div>
-      <a id="${linkId}" href="#" style="color:#007bff; text-decoration:underline;">ここに行く</a>
+      <a id="${linkId}" href="#" style="color:#007bff; text-decoration:underline;">${linkText}</a>
     </div>
   `;
 
   infoWindow.setContent(html);
   infoWindow.open(map, marker);
 
-  // InfoWindow内部のリンクにイベント付与
   google.maps.event.addListenerOnce(infoWindow, "domready", () => {
     const el = document.getElementById(linkId);
     if (!el) return;
     el.addEventListener("click", (e) => {
       e.preventDefault();
       if (!startMarker) {
-        displayMessage("出発地点が未設定です。地図をタップするか「現在地から避難」を押してください。");
+        displayMessage(T('noStartSet'));
         map.panTo(marker.getPosition());
         return;
       }
       const origin = startMarker.getPosition();
       drawRoute(origin, dest.location);
-      // drawRoute 内で距離・時間つきのメッセージを出します
     });
   });
 }
@@ -183,7 +207,7 @@ function setStartPoint(location) {
   startMarker = new google.maps.Marker({
     position: location,
     map: map,
-    title: "スタート地点",
+    title: (APP_LANG === "ja") ? "スタート地点" : "Start point",
   });
   findClosestPoint(location);
 }
@@ -213,7 +237,7 @@ function findClosestPoint(origin) {
   });
 
   if (nearbyDestinations.length === 0) {
-    displayMessage("700m以内に避難場所がありません。");
+    displayMessage(T('noNearby'));
     directionsRenderer.setDirections({ routes: [] });
     lastDistanceMeters = null;
     lastDurationText = null;
@@ -243,25 +267,23 @@ function findClosestPoint(origin) {
         }
 
         latestDestination = nearbyDestinations[closestIndex];
-
-        // 距離・時間を保持し、表示もここで行う
         lastDistanceMeters = distances[closestIndex].distance.value;
         lastDurationText  = distances[closestIndex].duration.text;
 
-        displayMessage(
-          `${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`
-        );
+        const summary = (APP_LANG === "ja")
+          ? `${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`
+          : `${latestDestination.name} (${lastDistanceMeters} m, about ${lastDurationText})`;
 
-        // 経路描画
+        displayMessage(summary);
         drawRoute(origin, latestDestination.location);
       } else {
-        displayMessage("エラー: " + status);
+        displayMessage(T('errorPrefix') + status);
       }
     }
   );
 }
 
-// ===== 経路描画（描画完了時の表示も距離・時間付きに統一）=====
+// ===== 経路描画 =====
 function drawRoute(origin, destination) {
   directionsService.route(
     {
@@ -272,16 +294,19 @@ function drawRoute(origin, destination) {
     function (result, status) {
       if (status === google.maps.DirectionsStatus.OK) {
         directionsRenderer.setDirections(result);
-
-        // 経路描画完了後のメッセージ
         if (latestDestination && lastDistanceMeters != null && lastDurationText != null) {
-          displayMessage(`${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`);
+          const summary = (APP_LANG === "ja")
+            ? `${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`
+            : `${latestDestination.name} (${lastDistanceMeters} m, about ${lastDurationText})`;
+          displayMessage(summary);
         } else if (latestDestination) {
-          // 念のためのフォールバック
-          displayMessage(`${latestDestination.name} へ経路を表示中…`);
+          const msg = (APP_LANG === "ja")
+            ? `${latestDestination.name} ${T('routeDrawing')}`
+            : `${latestDestination.name}${T('routeDrawing')}`;
+          displayMessage(msg);
         }
       } else {
-        displayMessage("経路描画エラー: " + status);
+        displayMessage(T('dirErrorPrefix') + status);
       }
     }
   );
@@ -295,7 +320,7 @@ function openInGoogleMaps(origin, destination) {
 
 function launchGoogleMap() {
   if (!startMarker || !latestDestination) {
-    displayMessage("出発地点と目的地を設定してください。");
+    displayMessage(T('needStartAndDest'));
     return;
   }
   const origin = startMarker.getPosition();
@@ -317,7 +342,7 @@ function useCurrentLocation() {
         setStartPoint(latLng);
       },
       function (error) {
-        displayMessage("現在地の取得に失敗しました: " + error.message);
+        displayMessage(MSG[APP_LANG].geolocFail(error.message));
       },
       {
         enableHighAccuracy: true,
@@ -326,7 +351,7 @@ function useCurrentLocation() {
       }
     );
   } else {
-    displayMessage("このブラウザは位置情報をサポートしていません。");
+    displayMessage(T('browserNoGeo'));
   }
 }
 
