@@ -14,7 +14,7 @@ const MSG = {
   ja: {
     noNearby: "700m以内に避難場所がありません。",
     noStartSet: "出発地点が未設定です。地図をタップするか「現在地から避難」を押してください。",
-    routeDrawing: "へ経路を表示中…",
+    routeDrawing: "経路を表示中…",
     errorPrefix: "エラー: ",
     dirErrorPrefix: "経路描画エラー: ",
     geolocFail: (m)=>`現在地の取得に失敗しました: ${m}`,
@@ -177,7 +177,7 @@ function openDestinationPopup(dest, marker) {
   if (!infoWindow) infoWindow = new google.maps.InfoWindow();
 
   const linkId = "goto-" + Math.random().toString(36).slice(2);
-  const linkText = (APP_LANG === "ja") ? "ここに行く" : "Go here";
+  const linkText = (APP_LANG === "ja") ? "ここに避難する" : "Evacuate here";
 
   const html = `
     <div style="font-size:14px; line-height:1.5; background:#fff; color:#000; padding:2px 0;">
