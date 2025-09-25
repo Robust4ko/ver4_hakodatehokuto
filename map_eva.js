@@ -1,4 +1,4 @@
-// map_eva.js （SVGアイコン + 多言語 + DistanceMatrix フォールバック）
+// map_eva.js ver4.4（SVGアイコン + 多言語 + DistanceMatrix フォールバック）
 
 /*
  1. コマンドプロンプトで、「E:\」を入力
