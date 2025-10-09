@@ -84,6 +84,11 @@ function initMap() {
     zoom: 15,
     center: center,
     clickableIcons: false,
+    gestureHandling: "greedy",   // ← ピンチ/スクロールを地図側で積極的に受ける
+    scrollwheel: true,           // ← ホイール操作は地図のズームに
+    mapTypeControl: false,
+    fullscreenControl: false,
+    streetViewControl: false
   });
 
   // 津波浸水想定域（GeoJSON）

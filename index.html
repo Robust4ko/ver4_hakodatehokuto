@@ -2,12 +2,12 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>津波避難シミュレーション</title>
   <style>
     :root { --header-h: 64px; }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+    html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; touch-action: manipulation; font-family: Arial, sans-serif; }
 
     /* 固定ヘッダー */
     header {
@@ -24,6 +24,7 @@
       justify-content: space-between;
       padding: 8px 12px;
       box-shadow: 0 2px 6px rgba(0,0,0,.15);
+      pointer-events: auto;
     }
     .header-left {
       display: flex;
@@ -74,6 +75,7 @@
     #map {
       position: absolute;
       inset: 0;
+      touch-action: pan-x pan-y;
     }
     .info-area {
       position: fixed;
@@ -85,6 +87,7 @@
       font-size: 0.85em;
       z-index: 900;
       box-shadow: 0 0 10px rgba(0,0,0,.3);
+      pointer-events: auto;
     }
     .info-area h2 { font-size: 1em; margin: 0; }
     #nearest-destination { margin-top: 4px; font-size: 0.95em; }
@@ -98,6 +101,7 @@
       color: white;
       cursor: pointer;
       white-space: nowrap;
+      pointer-events: auto;
     }
     button.use-location { background-color: #007bff; }
     button.use-location:hover { background-color: #005fcc; }
@@ -114,6 +118,7 @@
       width: 100%;
       bottom: 0;
       z-index: 800;
+      pointer-events: auto;
     }
 
     @media (max-width: 768px) {
