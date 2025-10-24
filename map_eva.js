@@ -1,3 +1,18 @@
+/**
+ * PATCH NOTES (2025-10-23):
+ * - Fix "closest destination" selection after Distance Matrix response:
+ *   Initialize with the first element whose status === "OK", then compare ONLY OK elements.
+ *   If none are OK, fall back to haversine straight-line nearest.
+ * - Apply the same robust logic to the secondary (fallback) Distance Matrix block as well.
+ * - Add defensive null checks when reading distance/duration from the chosen element.
+ * 
+ * Rationale:
+ * Some devices/poor network conditions return ZERO_RESULTS/NOT_FOUND for the first element.
+ * The previous implementation initialized minDistance from distances[0].distance.value,
+ * which can be undefined and break comparisons, accidentally keeping index 0.
+ * This caused HB to be chosen even when a closer HP existed and was visible.
+ */
+
 // map_eva.js ver4.4（SVGアイコン + 多言語 + DistanceMatrix フォールバック）
 
 /*
@@ -325,20 +340,31 @@ function findClosestPoint(originLatLng) {
         const distances = response.rows[0].elements;
 
         // 最小距離のインデックスを取得
-        let closestIndex = 0;
-        let minDistance = distances[0].distance.value;
-        for (let i = 1; i < distances.length; i++) {
-          if (distances[i].status === "OK" && distances[i].distance.value < minDistance) {
-            minDistance = distances[i].distance.value;
-            closestIndex = i;
-          }
-        }
+        let closestIndex = -1;
+let minDistance = Infinity;
+// Initialize from OK elements only
+for (let i = 0; i < distances.length; i++) {
+  if (distances[i].status === "OK") {
+    const dv = distances[i].distance.value;
+    if (dv < minDistance) {
+      minDistance = dv;
+      closestIndex = i;
+    }
+  }
+}
+// If no OK elements, fall back to straight-line (haversine) nearest
+if (closestIndex === -1) {
+  const originLL = { lat: origin.lat(), lng: origin.lng() };
+  closestIndex = selection.list
+    .map((d, i) => ({ i, dist: haversineMeters(originLL, d.location) }))
+    .sort((a, b) => a.dist - b.dist)[0].i;
+}
 
         latestDestination = selection.list[closestIndex];
 
         // 距離・時間を保持し、表示
-        lastDistanceMeters = distances[closestIndex].distance.value;
-        lastDurationText  = distances[closestIndex].duration.text;
+        lastDistanceMeters = distances[closestIndex]?.distance?.value ?? null;
+        lastDurationText  = distances[closestIndex]?.duration?.text ?? T('walkUnknown');
 
         const summary = (APP_LANG === "ja")
           ? `${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`
@@ -366,17 +392,22 @@ function findClosestPoint(originLatLng) {
           function (resp2, status2) {
             if (status2 === google.maps.DistanceMatrixStatus.OK) {
               const distances2 = resp2.rows[0].elements;
-              let idx = 0;
-              let min = distances2[0].distance.value;
-              for (let i = 1; i < distances2.length; i++) {
-                if (distances2[i].status === "OK" && distances2[i].distance.value < min) {
-                  min = distances2[i].distance.value;
-                  idx = i;
-                }
-              }
+              let idx = -1, min = Infinity;
+for (let i = 0; i < distances2.length; i++) {
+  if (distances2[i].status === "OK") {
+    const dv = distances2[i].distance.value;
+    if (dv < min) { min = dv; idx = i; }
+  }
+}
+if (idx === -1) {
+  const originLL = { lat: origin.lat(), lng: origin.lng() };
+  idx = nearest25
+    .map((d, i) => ({ i, dist: haversineMeters(originLL, d.location) }))
+    .sort((a, b) => a.dist - b.dist)[0].i;
+}
               latestDestination = nearest25[idx];
-              lastDistanceMeters = distances2[idx].distance.value;
-              lastDurationText  = distances2[idx].duration.text;
+              lastDistanceMeters = distances2[idx]?.distance?.value ?? null;
+              lastDurationText  = distances2[idx]?.duration?.text ?? T('walkUnknown');
               const summary2 = (APP_LANG === "ja")
                 ? `${latestDestination.name}（${lastDistanceMeters} m、約 ${lastDurationText}）`
                 : `${latestDestination.name} (${lastDistanceMeters} m, about ${lastDurationText})`;
