@@ -147,9 +147,16 @@ function loadDestinations() {
   return fetch("./destinations.json")
     .then((response) => response.json())
     .then((data) => {
-      destinations = data;
-      data.forEach((dest) => {
-        addCustomMarker(dest.location, dest.name, "./HB.svg", 34);
+       data.forEach((dest) => {
+        const structured = {
+        name: dest.name,
+          location: {
+            lat: dest.location?.lat ?? dest.lat,
+            lng: dest.location?.lng ?? dest.lng,
+          },
+        };
+        destinations.push(structured);
+      addCustomMarker(structured.location, structured.name, "./HB.svg", 34);
       });
     });
 }
